@@ -10,7 +10,7 @@ use burn::{
     tensor::{Tensor, activation},
 };
 
-/// 轻量残差块：Conv → ReLU → Conv → 残差相加。
+// 轻量残差块：Conv → ReLU → Conv → 残差相加。
 #[derive(Module, Debug)]
 pub struct ResBlock<B: Backend> {
     conv1: Conv2d<B>,
@@ -46,7 +46,7 @@ impl<B: Backend> ResBlock<B> {
     }
 }
 
-/// 双分支特征融合：concat → 1×1 投影 → 残差精炼。
+// 双分支特征融合：concat → 1×1 投影 → 残差精炼。
 #[derive(Module, Debug)]
 pub struct FusionBlock<B: Backend> {
     project: Conv2d<B>,
@@ -78,7 +78,7 @@ impl<B: Backend> FusionBlock<B> {
     }
 }
 
-/// 深度可分离卷积：逐通道空间卷积 + 1×1 点卷积，用于 4K 参考图的高效浅层处理。
+// 深度可分离卷积：逐通道空间卷积 + 1×1 点卷积，用于 4K 参考图的高效浅层处理。。
 #[derive(Module, Debug)]
 pub struct DepthwiseSeparableConv<B: Backend> {
     depthwise: Conv2d<B>,
@@ -112,7 +112,7 @@ impl<B: Backend> DepthwiseSeparableConv<B> {
     }
 }
 
-/// 2× 上采样阶段：双线性插值 → 卷积平滑 → 与参考 skip 融合。
+// 2× 上采样阶段：双线性插值 → 卷积平滑 → 与参考 skip 融合。
 #[derive(Module, Debug)]
 pub struct UpsampleStage<B: Backend> {
     smooth: Conv2d<B>,

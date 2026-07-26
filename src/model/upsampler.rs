@@ -16,25 +16,8 @@ use super::blocks::{
 };
 use super::presence_gate::{PresenceGate, PresenceGateConfig};
 
-/// 参考引导条件上采样器。
-///
-/// # 架构概览
-///
-/// ```text
-/// main (1024) ──► MainEncoder ──► fusion @1024 ◄── ref_f2 (1024)
-///                                      │
-///                               UpsampleStage ×2
-///                                      │
-/// ref (4096) ──► RefEncoder ──► skip: f0@4096, f1@2048, f2@1024
-///                                      │
-///                               DetailHead → delta
-/// main_up (bicubic 4096) + gate * delta → output (4096)
-/// ```
-///
-/// 与常规超分模型的核心区别：
-/// 1. 参考图提供真实纹理先验，模型只需学习「何时、何处」借用细节
-/// 2. PresenceGate 显式建模「主图有内容 → 借参考；主图无内容 → 不画回」
-/// 3. 输出为残差形式：`out = main_up + gate ⊙ delta`，避免全局重绘
+// 参考引导条件上采样器。
+
 #[derive(Module, Debug)]
 pub struct RefGuidedUpsampler<B: Backend> {
     main_stem: Conv2d<B>,
@@ -58,12 +41,12 @@ struct MainEncoder<B: Backend> {
 
 #[derive(Module, Debug)]
 struct RefEncoder<B: Backend> {
-    /// 4096 尺度浅层特征（仅 2 层 depthwise，控制显存）
+    // 4096 尺度浅层特征（仅 2 层 depthwise，控制显存）
     full_res_blocks: Vec<DepthwiseSeparableConv<B>>,
-    /// 4096 → 2048
+    // 4096 → 2048
     pool_to_2048: Conv2d<B>,
     blocks_2048: Vec<ResBlock<B>>,
-    /// 2048 → 1024
+    // 2048 → 1024
     pool_to_1024: Conv2d<B>,
     blocks_1024: Vec<ResBlock<B>>,
 }
@@ -147,7 +130,7 @@ impl<B: Backend> MainEncoder<B> {
 }
 
 impl<B: Backend> RefEncoder<B> {
-    /// 返回 `(ref_f0@4096, ref_f1@2048, ref_f2@1024)` 三级 skip 特征。
+    // 返回 (ref_f0@4096, ref_f1@2048, ref_f2@1024) 三级 skip 特征。
     fn forward(&self, input: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 4>, Tensor<B, 4>) {
         let mut f0 = input;
         for block in &self.full_res_blocks {
@@ -171,12 +154,12 @@ impl<B: Backend> RefEncoder<B> {
 }
 
 impl<B: Backend> RefGuidedUpsampler<B> {
-    /// 前向推理。
-    ///
-    /// - `main`: `[B, 3, 1024, 1024]` Flux2 编辑后的主图
-    /// - `reference`: `[B, 3, 4096, 4096]` 原始参考图（与主图同场景、像素对齐）
-    ///
-    /// 返回 `[B, 3, 4096, 4096]` 成品图。
+    // 前向推理。
+    //
+    // main：[B, 3, 1024, 1024] Flux2 编辑后的主图
+    // reference: [B, 3, 4096, 4096] 原始参考图（与主图同场景、像素对齐）
+    //
+    // 返回 [B, 3, 4096, 4096] 成品图。
     pub fn forward(&self, main: Tensor<B, 4>, reference: Tensor<B, 4>) -> Tensor<B, 4> {
         let main_up = self.upsample_4x.forward(main.clone());
 
@@ -206,12 +189,12 @@ impl<B: Backend> RefGuidedUpsampler<B> {
     }
 }
 
-/// 将 RGB 张量限制在 [0, 1]。
+// 将 RGB 张量限制在 [0, 1]
 fn clamp01<B: Backend>(tensor: Tensor<B, 4>) -> Tensor<B, 4> {
     activation::relu(tensor).clamp_max(1.0)
 }
 
-/// 训练损失建议（供训练脚本参考，非 Module 一部分）。
+// 训练损失建议（供训练脚本参考，非 Module 一部分）
 #[allow(dead_code)]
 pub struct TrainingLossHints {
     pub l1_weight: f32,

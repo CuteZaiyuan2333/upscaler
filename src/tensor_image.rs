@@ -18,7 +18,7 @@ pub enum ImageTensorError {
     },
 }
 
-/// 将 RGB 图像加载为 `[1, 3, H, W]` 浮点张量，像素值归一化到 [0, 1]。
+// 将 RGB 图像加载为 [1, 3, H, W]浮点张量，像素值归一化到 [0, 1]
 pub fn load_rgb_tensor<B: Backend>(
     path: impl AsRef<Path>,
     expected_size: Option<(u32, u32)>,
@@ -41,8 +41,7 @@ pub fn load_rgb_tensor<B: Backend>(
 
     Ok(rgb_image_to_tensor(rgb, device))
 }
-
-/// 将 `[1, 3, H, W]` 张量保存为 8-bit RGB PNG。
+// 将 [1, 3, H, W] 张量保存为 8bit RGB PNG
 pub fn save_rgb_tensor<B: Backend>(
     tensor: Tensor<B, 4>,
     path: impl AsRef<Path>,
