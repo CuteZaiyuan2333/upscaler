@@ -1,9 +1,11 @@
 // use burn::backend::NdArray;
+// use burn::backend::Cuda
 use burn::backend::Wgpu;
 use burn::prelude::Module;
 use upscaler::RefGuidedUpsamplerConfig;
 
 // type Backend = NdArray;
+// tyoe Backend = Cuda;
 type Backend = Wgpu;
 
 fn main() {
