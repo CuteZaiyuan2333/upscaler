@@ -215,10 +215,12 @@ impl Default for TrainingLossHints {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burn::backend::NdArray;
+    //use burn::backend::NdArray;
+    use burn::backend::Wgpu;
     use burn::prelude::Module;
 
-    type TestBackend = NdArray;
+    //type TestBackend = NdArray;
+    type TestBackend = Wgpu;
 
     #[test]
     #[ignore = "全分辨率 4096 前向在 CPU 上较慢，使用 cargo test -- --ignored 运行"]

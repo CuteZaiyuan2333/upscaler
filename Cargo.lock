@@ -6742,6 +6742,7 @@ version = "0.1.0"
 dependencies = [
  "burn",
  "image",
+ "rand 0.8.7",
  "thiserror 2.0.19",
 ]
 
