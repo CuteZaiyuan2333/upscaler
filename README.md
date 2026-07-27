@@ -120,6 +120,17 @@ RefGuidedUpsampler
 - `save_rgb_tensor`：将 `[1, 3, H, W]` 张量保存为 8-bit RGB PNG。
 - `ImageTensorError`：统一错误类型，包含 I/O、颜色类型、尺寸不匹配三种情况。
 
+### `training.rs` — 自监督训练模块
+
+- **`TrainingConfig`**：完整训练配置（学习率、轮数、裁剪尺寸、损失权重等），支持通过环境变量覆盖。
+- **`HighResDataset`**：从目录扫描高分辨率图像，`random_crop_pair` 动态裁剪训练对——将 HR 区域下采样 4× 作为主图，原图作为参考图和训练目标。
+- **`Trainer`**：训练循环封装，支持 AdamW 优化、检查点保存/恢复、训练指标追踪。
+- **损失函数**：提供 `l1_loss` 和 `mse_loss`，默认使用 L1 损失。
+
+### `augmentation.rs` — 相机滤镜数据增强
+
+提供 16 种相机滤镜（Warm、Cool、Vivid、Fade、Mono、Noir、Chrome、Sepia、ToyCamera、Grain、SoftFocus、Underexpose、Overexpose、Invert、Posterize），训练时 80% 概率对主图施加随机滤镜，30% 概率叠加第二个轻量滤镜，模拟 Flux2 编辑引入的色彩/光照变化。
+
 ---
 
 ## 配置参数
@@ -155,7 +166,14 @@ RefGuidedUpsampler
 ### 编译
 
 ```bash
+# 编译全部（推理 + 训练）
 cargo build --release
+
+# 仅编译推理二进制
+cargo build --release --bin upscaler
+
+# 仅编译训练二进制
+cargo build --release --bin train
 ```
 
 ### 运行（模型信息）
@@ -163,6 +181,28 @@ cargo build --release
 ```bash
 cargo run --release
 ```
+
+### 训练
+
+```bash
+# 快速开始（裁剪模式 256→1024，需准备高分辨率图像数据集）
+DATA_DIR=./dataset cargo run --release --bin train
+
+# 自定义参数
+DATA_DIR=./dataset \
+EPOCHS=200 \
+STEPS_PER_EPOCH=2000 \
+LR=0.0002 \
+CROP_SIZE=256 \
+cargo run --release --bin train
+
+# 从检查点恢复训练
+DATA_DIR=./dataset \
+CHECKPOINT=./checkpoints \
+cargo run --release --bin train
+```
+
+> 详细训练指南见 [TRAINING.md](TRAINING.md)（数据集准备、配置参数、训练策略、常见问题等）。
 
 ### 测试
 
@@ -218,10 +258,15 @@ upscaler/
 ├── Cargo.toml                  # 依赖与项目配置
 ├── Cargo.lock                  # 锁定依赖版本
 ├── README.md                   # 本文档
+├── TRAINING.md                 # 训练指南（详细配置、数据集准备、训练策略）
 └── src/
     ├── lib.rs                  # 公共 API 导出
-    ├── main.rs                 # 二进制入口（模型信息展示）
+    ├── main.rs                 # 推理二进制入口（模型信息展示）
     ├── tensor_image.rs         # 图像 ↔ Tensor 转换工具
+    ├── training.rs             # 自监督训练模块（数据集、损失函数、训练循环）
+    ├── augmentation.rs         # 相机滤镜数据增强（16 种滤镜）
+    ├── bin/
+    │   └── train.rs            # 训练二进制入口（环境变量配置）
     └── model/
         ├── mod.rs              # 模块组织与导出
         ├── upsampler.rs        # 主模型 RefGuidedUpsampler + 训练损失建议
@@ -231,17 +276,35 @@ upscaler/
 
 ---
 
-## 训练计划
+## 训练
 
-代码中预留了 `TrainingLossHints` 结构体（`src/model/upsampler.rs:199`），建议的训练损失配置：
+本项目已实现完整的自监督训练流程，详见 [TRAINING.md](TRAINING.md)。
+
+### 训练策略
+
+采用**自监督学习**——从高分辨率图像中随机裁剪区域，将下采样 4× 的版本作为"主图"，原始区域同时作为"参考图"和训练目标。模型学习从参考图中恢复被降采样丢失的高频细节。
+
+### 损失配置
 
 | 损失项 | 权重 | 说明 |
 |---|---|---|
 | L1 Loss | 1.0 | 像素级重建损失 |
-| Perceptual Loss | 0.1 | 感知特征匹配损失 |
-| Gate Supervision | 0.0 | 门控监督损失（预留，当前未启用） |
+| Delta Sparsity | 0.01 | 鼓励 delta 稀疏，避免过度修正 |
+| Perceptual Loss | 0.0（预留） | 感知特征匹配损失，需额外依赖 |
+| Gate Supervision | 0.0（预留） | 门控监督损失，当前通过噪声扰动隐式训练 |
 
-> **注意：** 训练代码尚未实现，当前仅包含模型架构定义和推理入口。
+### 训练配置（环境变量）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DATA_DIR` | `./dataset` | 数据集目录 |
+| `EPOCHS` | 100 | 训练轮数 |
+| `STEPS_PER_EPOCH` | 1000 | 每轮步数 |
+| `LR` | 0.0001 | 学习率 |
+| `CROP_SIZE` | 256 | 主图裁剪尺寸（ref 自动为 4×） |
+| `FULL_RES` | 0 | 全分辨率模式（1=1024→4096，需 24+ GB VRAM） |
+| `REF_NOISE` | 0.02 | 参考图噪声标准差（帮助门控训练） |
+| `CHECKPOINT` | — | 从指定检查点恢复训练 |
 
 ---
 
