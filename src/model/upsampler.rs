@@ -107,13 +107,15 @@ impl RefGuidedUpsamplerConfig {
                 .with_padding(PaddingConfig2d::Same)
                 .init(device),
             presence_gate: PresenceGateConfig::new(self.gate_hidden_channels).init(device),
+            // 使用 Nearest 模式而非 Linear：CubeCL/WGPU 后端不支持双线性插值的反向传播。
+            // UpsampleStage 中的 smooth 卷积层会补偿最近邻上采样带来的块状伪影。
             upsample_2x: Interpolate2dConfig::new()
                 .with_scale_factor(Some([2.0, 2.0]))
-                .with_mode(InterpolateMode::Linear)
+                .with_mode(InterpolateMode::Nearest)
                 .init(),
             upsample_4x: Interpolate2dConfig::new()
                 .with_scale_factor(Some([4.0, 4.0]))
-                .with_mode(InterpolateMode::Linear)
+                .with_mode(InterpolateMode::Nearest)
                 .init(),
         }
     }

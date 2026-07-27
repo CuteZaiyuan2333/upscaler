@@ -210,7 +210,7 @@ cargo run --release --bin train
 # 运行常规测试
 cargo test
 
-# 运行 4096 全分辨率前向测试（严禁运行，存在不可预测的BUG，导致电脑完全卡死）
+# 运行 4096 全分辨率前向测试（CPU模式严禁运行，存在不可预测的BUG，导致电脑完全卡死）
 cargo test -- --ignored
 ```
 
