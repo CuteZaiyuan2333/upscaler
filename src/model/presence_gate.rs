@@ -61,7 +61,7 @@ impl<B: Backend> PresenceGate<B> {
     }
 }
 
-/// ITU-R BT.601 亮度近似，用于结构差异度量。
+// ITU-R BT.601 亮度近似，用于结构差异度量。
 fn luminance_abs_diff<B: Backend>(a: &Tensor<B, 4>, b: &Tensor<B, 4>) -> Tensor<B, 4> {
     let ya = rgb_to_luminance(a.clone());
     let yb = rgb_to_luminance(b.clone());

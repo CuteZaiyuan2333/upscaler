@@ -27,20 +27,17 @@ type Backend = Autodiff<Wgpu>;
 fn main() -> Result<(), String> {
     let config = parse_config();
 
-    println!("═══════════════════════════════════════════════════");
-    println!("  RefGuidedUpsampler 训练程序");
-    println!("═══════════════════════════════════════════════════");
-    println!("  后端: Autodiff<Wgpu>");
-    println!("  模型: base_channels=64, num_res_blocks=4");
-    println!("═══════════════════════════════════════════════════");
+    println!("RefGuidedUpsampler 训练程序");
+    println!("->后端: Autodiff<Wgpu>");
+    println!("->模型: base_channels=64, num_res_blocks=4");
 
     let data_dir = env::var("DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("./dataset"));
 
-    println!("📂 加载数据集: {}", data_dir.display());
+    println!("加载数据集: {}", data_dir.display());
     let mut dataset = HighResDataset::from_dir(&data_dir)?;
-    println!("   找到 {} 张图像", dataset.len());
+    println!("找到 {} 张图像", dataset.len());
 
     let device = Default::default();
     let model_config = RefGuidedUpsamplerConfig::new();
@@ -48,12 +45,12 @@ fn main() -> Result<(), String> {
 
     if let Ok(checkpoint) = env::var("CHECKPOINT") {
         let cp_path = PathBuf::from(&checkpoint);
-        println!("📦 从检查点恢复: {}", cp_path.display());
+        println!("从检查点恢复: {}", cp_path.display());
         trainer.load_checkpoint(&cp_path)?;
     }
 
     trainer.train(&mut dataset)?;
-    println!("🎉 训练完成！");
+    println!("训练完成");
     Ok(())
 }
 

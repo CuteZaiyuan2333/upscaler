@@ -4,50 +4,50 @@
 // 同时保持 4096×4096 参考图不变。模型需要学习从参考图中恢复原始细节，
 // 而非简单地复制参考图。
 //
-// 所有滤镜基于 `image` crate 的 RgbImage 操作，无需额外依赖。
+// 所有滤镜基于image库的 RgbImage 操作，无需额外依赖。
 
 use image::{Rgb, RgbImage};
 use rand::Rng;
 
-/// 相机滤镜类型。
+// 相机滤镜类型。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CameraFilter {
-    /// 原图（不处理）
+    // 原图（不处理）
     Original,
-    /// 暖色调：增加红/黄色温
+    // 暖色调：增加红/黄色温
     Warm,
-    /// 冷色调：增加蓝色温
+    // 冷色调：增加蓝色温
     Cool,
-    /// 鲜艳：提高饱和度 + 对比度
+    // 鲜艳：提高饱和度 + 对比度
     Vivid,
-    /// 褪色：降低对比度，略微提亮
+    // 褪色：降低对比度，略微提亮
     Fade,
-    /// 黑白：去饱和
+    // 黑白：去饱和
     Mono,
-    /// 高对比度黑白
+    // 高对比度黑白
     Noir,
-    /// 铬黄：高饱和 + 高对比
+    // 铬黄：高饱和 + 高对比
     Chrome,
-    /// 老旧照片：棕褐色调 + 褪色
+    // 老旧照片：棕褐色调 + 褪色
     Sepia,
-    /// 玩具相机：暗角 + 轻微模糊
+    // 玩具相机：暗角 + 轻微模糊
     ToyCamera,
-    /// 胶片颗粒：添加随机噪声
+    // 胶片颗粒：添加随机噪声
     Grain,
-    /// 柔焦：轻微模糊
+    // 柔焦：轻微模糊
     SoftFocus,
-    /// 曝光不足
+    // 曝光不足
     Underexpose,
-    /// 曝光过度
+    // 曝光过度
     Overexpose,
-    /// 反转色
+    // 反转色
     Invert,
-    /// 海报化：减少颜色层次
+    // 海报化：减少颜色层次
     Posterize,
 }
 
 impl CameraFilter {
-    /// 所有滤镜的列表。
+    // 所有滤镜的列表。
     pub fn all() -> &'static [CameraFilter] {
         &[
             CameraFilter::Original,
@@ -70,7 +70,7 @@ impl CameraFilter {
     }
 }
 
-/// 对图像应用指定的相机滤镜。
+// 对图像应用指定的相机滤镜。
 pub fn apply_filter(img: &RgbImage, filter: CameraFilter) -> RgbImage {
     match filter {
         CameraFilter::Original => img.clone(),
@@ -92,7 +92,7 @@ pub fn apply_filter(img: &RgbImage, filter: CameraFilter) -> RgbImage {
     }
 }
 
-/// 随机选择一个滤镜并应用，有概率叠加多个滤镜。
+//随机选择一个滤镜并应用，有概率叠加多个滤镜。
 pub fn apply_random_filter(rng: &mut impl Rng, img: &RgbImage) -> RgbImage {
     let all = CameraFilter::all();
     let idx = rng.gen_range(0..all.len());
@@ -118,8 +118,8 @@ pub fn apply_random_filter(rng: &mut impl Rng, img: &RgbImage) -> RgbImage {
 // 基础像素操作
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// 将 RGB 像素转换为 HSL 分量。
-/// 返回 (h: 0-360, s: 0.0-1.0, l: 0.0-1.0)
+// 将 RGB 像素转换为 HSL 分量。
+// 返回 (h: 0-360, s: 0.0-1.0, l: 0.0-1.0)
 fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     let rf = r as f32 / 255.0;
     let gf = g as f32 / 255.0;
@@ -175,7 +175,7 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
     )
 }
 
-/// 遍历每个像素，应用 HSL 变换。
+// 遍历每个像素，应用 HSL 变换。
 fn map_hsl(img: &RgbImage, f: impl Fn(f32, f32, f32) -> (f32, f32, f32)) -> RgbImage {
     let mut out = RgbImage::new(img.width(), img.height());
     for (x, y, pix) in img.enumerate_pixels() {
@@ -187,11 +187,9 @@ fn map_hsl(img: &RgbImage, f: impl Fn(f32, f32, f32) -> (f32, f32, f32)) -> RgbI
     out
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 滤镜实现
-// ═══════════════════════════════════════════════════════════════════════════════
 
-/// 暖色调：色调向红/黄偏移，略微提亮。
+// 暖色调：色调向红/黄偏移，略微提亮。
 fn warm(img: &RgbImage) -> RgbImage {
     let mut out = img.clone();
     for (_, _, pix) in out.enumerate_pixels_mut() {
@@ -202,7 +200,7 @@ fn warm(img: &RgbImage) -> RgbImage {
     out
 }
 
-/// 冷色调：色调向蓝偏移。
+// 冷色调：色调向蓝偏移。
 fn cool(img: &RgbImage) -> RgbImage {
     let mut out = img.clone();
     for (_, _, pix) in out.enumerate_pixels_mut() {
@@ -213,32 +211,32 @@ fn cool(img: &RgbImage) -> RgbImage {
     out
 }
 
-/// 鲜艳：提高饱和度 50% + 提高对比度。
+// 鲜艳：提高饱和度 50% + 提高对比度。
 fn vivid(img: &RgbImage) -> RgbImage {
     let saturated = map_hsl(img, |h, s, l| (h, (s * 1.5).min(1.0), l));
     image::imageops::contrast(&saturated, 20.0)
 }
 
-/// 褪色：降低对比度，略微提亮，模拟长时间曝光或滤镜效果。
+// 褪色：降低对比度，略微提亮，模拟长时间曝光或滤镜效果。
 fn fade(img: &RgbImage) -> RgbImage {
     let low_contrast = image::imageops::contrast(img, -30.0);
     image::imageops::brighten(&low_contrast, 20)
 }
 
-/// 黑白：完全去饱和。
+// 黑白：完全去饱和。
 fn mono(img: &RgbImage) -> RgbImage {
     let gray = image::imageops::grayscale(img);
     image::DynamicImage::ImageLuma8(gray).to_rgb8()
 }
 
-/// 高对比度黑白：去饱和 + 提高对比度。
+// 高对比度黑白：去饱和 + 提高对比度。
 fn noir(img: &RgbImage) -> RgbImage {
     let gray = image::imageops::grayscale(img);
     let contrast = image::imageops::contrast(&gray, 50.0);
     image::DynamicImage::ImageLuma8(contrast).to_rgb8()
 }
 
-/// 铬黄：高饱和 + 高对比 + 微暖色调。
+// 铬黄：高饱和 + 高对比 + 微暖色调。
 fn chrome(img: &RgbImage) -> RgbImage {
     let vivid = map_hsl(img, |h, s, l| (h, (s * 1.8).min(1.0), l));
     let contrast = image::imageops::contrast(&vivid, 30.0);
@@ -249,7 +247,7 @@ fn chrome(img: &RgbImage) -> RgbImage {
     out
 }
 
-/// 棕褐色调：经典的老照片效果。
+// 棕褐色调：经典的老照片效果。
 fn sepia(img: &RgbImage) -> RgbImage {
     let mut out = RgbImage::new(img.width(), img.height());
     for (x, y, pix) in img.enumerate_pixels() {
@@ -266,13 +264,13 @@ fn sepia(img: &RgbImage) -> RgbImage {
     out
 }
 
-/// 玩具相机：暗角 + 轻微模糊 + 略微提亮中心。
+// 玩具相机：暗角 + 轻微模糊 + 略微提亮中心。
 fn toy_camera(img: &RgbImage) -> RgbImage {
     let blurred = image::imageops::blur(img, 0.5);
     vignette(&blurred, 0.4)
 }
 
-/// 胶片颗粒：添加随机噪声。
+// 胶片颗粒：添加随机噪声。
 fn grain(img: &RgbImage) -> RgbImage {
     let mut rng = rand::thread_rng();
     let mut out = img.clone();
@@ -286,12 +284,12 @@ fn grain(img: &RgbImage) -> RgbImage {
     out
 }
 
-/// 柔焦：轻微高斯模糊。
+// 柔焦：轻微高斯模糊。
 fn soft_focus(img: &RgbImage) -> RgbImage {
     image::imageops::blur(img, 1.0)
 }
 
-/// 曝光调整：乘以一个系数。
+// 曝光调整：乘以一个系数。
 fn exposure(img: &RgbImage, factor: f32) -> RgbImage {
     let mut out = img.clone();
     for (_, _, pix) in out.enumerate_pixels_mut() {
@@ -303,14 +301,14 @@ fn exposure(img: &RgbImage, factor: f32) -> RgbImage {
     out
 }
 
-/// 反转色。
+// 反转色。
 fn invert(img: &RgbImage) -> RgbImage {
     let mut out = img.clone();
     image::imageops::invert(&mut out);
     out
 }
 
-/// 海报化：减少颜色层次。
+// 海报化：减少颜色层次。
 fn posterize(img: &RgbImage, levels: u8) -> RgbImage {
     let step = 255.0 / (levels - 1) as f32;
     let mut out = img.clone();
@@ -323,7 +321,7 @@ fn posterize(img: &RgbImage, levels: u8) -> RgbImage {
     out
 }
 
-/// 暗角效果：从中心向外逐渐变暗。
+// 暗角效果：从中心向外逐渐变暗。
 fn vignette(img: &RgbImage, strength: f32) -> RgbImage {
     let mut out = img.clone();
     let (w, h) = out.dimensions();
@@ -346,9 +344,7 @@ fn vignette(img: &RgbImage, strength: f32) -> RgbImage {
     out
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 测试
-// ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]
 mod tests {

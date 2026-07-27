@@ -89,7 +89,7 @@ fn rgb_image_to_tensor<B: Backend>(img: RgbImage, device: &B::Device) -> Tensor<
     let pixels = img.into_raw();
     let mut data = Vec::with_capacity(pixels.len());
 
-    // HWC → CHW
+    // HWC -》 CHW
     for c in 0..3 {
         for y in 0..height {
             for x in 0..width {

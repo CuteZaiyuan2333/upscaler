@@ -1,15 +1,15 @@
-// 训练模块 — RefGuidedUpsampler 自监督训练
+// 训练模块RefGuidedUpsampler自监督训练
 //
 // 训练策略：
-//   从高分辨率图像（≥4096×4096）中随机裁剪配对区域：
-//     main_crop   = 降采样到 256×256（模拟 Flux2 编辑后的低分辨率主图）
-//     ref_crop    = 对应 1024×1024 区域（原始高分辨率参考图）
-//     ground_truth = 对应 1024×1024 区域（训练目标）
-//   模型学习从参考图中恢复高频细节，同时保留主图的语义内容。
+// 从高分辨率图像（≥4096×4096）中随机裁剪配对区域：
+// main_crop   = 降采样到 256×256（模拟 Flux2 编辑后的低分辨率主图）
+// ref_crop    = 对应 1024×1024 区域（原始高分辨率参考图）
+// ground_truth = 对应 1024×1024 区域（训练目标）
+// 模型学习从参考图中恢复高频细节，同时保留主图的语义内容。
 //
 // 显存优化（可在 8-16 GB VRAM GPU 上训练）：
-//   - 默认使用 256×256 main / 1024×1024 ref 裁剪（而非全分辨率 4K）
-//   - 全分辨率微调作为可选项（需 24+ GB VRAM）
+// 默认使用 256×256 main / 1024×1024 ref 裁剪（而非全分辨率 4K）
+// 全分辨率微调作为可选项（需 24+ GB VRAM）
 
 use burn::{
     module::Module,
@@ -30,43 +30,41 @@ use crate::model::RefGuidedUpsamplerConfig;
 use crate::RefGuidedUpsampler;
 use crate::augmentation;
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 训练配置
-// ═══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Clone)]
 pub struct TrainingConfig {
-    /// 训练轮数
+    // 训练轮数
     pub num_epochs: usize,
-    /// 每轮训练步数
+    // 每轮训练步数
     pub steps_per_epoch: usize,
-    /// 学习率
+    // 学习率
     pub learning_rate: f64,
-    /// AdamW 权重衰减
+    // AdamW 权重衰减
     pub weight_decay: f32,
-    /// 主图裁剪尺寸（main 输入大小，ref 大小 = main × 4）
+    // 主图裁剪尺寸（main 输入大小，ref 大小 = main × 4）
     pub crop_main_size: u32,
-    /// 验证集比例（0.0 ~ 1.0）
+    // 验证集比例（0.0 ~ 1.0）
     pub val_split: f32,
-    /// 每 N 步保存一次检查点
+    // 每 N 步保存一次检查点
     pub checkpoint_every_steps: usize,
-    /// 检查点保存目录
+    // 检查点保存目录
     pub checkpoint_dir: PathBuf,
-    /// 日志目录
+    // 日志目录
     pub log_dir: PathBuf,
-    /// 随机种子
+    // 随机种子
     pub seed: u64,
-    /// 是否使用全分辨率训练（1024→4096，需大量显存）
+    // 是否使用全分辨率训练（1024→4096，需大量显存）
     pub full_resolution: bool,
-    /// 训练时对参考图添加噪声扰动（帮助存在性门控学习）
+    // 训练时对参考图添加噪声扰动（帮助存在性门控学习）
     pub ref_noise_std: f32,
-    /// L1 损失权重
+    // L1 损失权重
     pub l1_weight: f32,
-    /// 感知损失权重（当前为占位，需额外依赖）
+    // 感知损失权重（当前为占位，需额外依赖）
     pub perceptual_weight: f32,
-    /// 门控监督损失权重（当前为 0，预留）
+    // 门控监督损失权重（当前为 0，预留）
     pub gate_supervision_weight: f32,
-    /// 是否对主图应用相机滤镜增强（模拟 Flux2 编辑引入的色彩/光照变化）
+    // 是否对主图应用相机滤镜增强（模拟 Flux2 编辑引入的色彩/光照变化）
     pub use_camera_filters: bool,
 }
 
@@ -93,20 +91,18 @@ impl Default for TrainingConfig {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 数据集
-// ═══════════════════════════════════════════════════════════════════════════════
 
-/// 高分辨率图像数据集。
-///
-/// 从目录中读取所有 PNG/JPG 图像，训练时动态裁剪配对区域。
+// 高分辨率图像数据集。
+//
+// 从目录中读取所有 PNG/JPG 图像，训练时动态裁剪配对区域。
 pub struct HighResDataset {
     image_paths: Vec<PathBuf>,
     rng: rand::rngs::StdRng,
 }
 
 impl HighResDataset {
-    /// 扫描目录，收集所有 PNG/JPG 图像文件。
+    // 扫描目录，收集所有 PNG/JPG 图像文件。
     pub fn from_dir(data_dir: &Path) -> Result<Self, String> {
         if !data_dir.exists() {
             return Err(format!("数据集目录不存在: {}", data_dir.display()));
@@ -135,7 +131,7 @@ impl HighResDataset {
         })
     }
 
-    /// 图像数量。
+    // 图像数量。
     pub fn len(&self) -> usize {
         self.image_paths.len()
     }
@@ -144,9 +140,9 @@ impl HighResDataset {
         self.image_paths.is_empty()
     }
 
-    /// 随机选择一张图像，加载并裁剪训练对。
-    ///
-    /// 返回 (main_crop, ref_crop, ground_truth, image_path)。
+    // 随机选择一张图像，加载并裁剪训练对。
+    //
+    // 返回 (main_crop, ref_crop, ground_truth, image_path)。
     pub fn random_crop_pair(
         &mut self,
         main_size: u32,
@@ -210,9 +206,7 @@ impl HighResDataset {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 张量转换工具
-// ═══════════════════════════════════════════════════════════════════════════════
 
 fn rgb_to_tensor<B: Backend>(img: &RgbImage, device: &B::Device) -> Tensor<B, 4> {
     let (w, h) = img.dimensions();
@@ -244,9 +238,7 @@ fn add_gaussian_noise<B: Backend>(tensor: Tensor<B, 4>, std: f32, device: &B::De
     tensor + noise.reshape([shape[0], shape[1], shape[2], shape[3]])
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 损失函数
-// ═══════════════════════════════════════════════════════════════════════════════
 
 pub fn l1_loss<B: Backend>(pred: Tensor<B, 4>, target: Tensor<B, 4>) -> Tensor<B, 1> {
     (pred - target).abs().mean()
@@ -257,9 +249,7 @@ pub fn mse_loss<B: Backend>(pred: Tensor<B, 4>, target: Tensor<B, 4>) -> Tensor<
     loss_module.forward(pred, target, burn::nn::loss::Reduction::Mean)
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 训练器
-// ═══════════════════════════════════════════════════════════════════════════════
 
 #[derive(Debug, Default)]
 pub struct TrainingMetrics {
@@ -294,7 +284,7 @@ impl<B: Backend> Trainer<B> {
         }
     }
 
-    /// 从检查点恢复模型。
+    // 从检查点恢复模型。
     pub fn load_checkpoint(&mut self, checkpoint_path: &Path) -> Result<(), String> {
         let model_path = checkpoint_path.join("model_latest.bin");
         if !model_path.exists() {
@@ -306,11 +296,11 @@ impl<B: Backend> Trainer<B> {
             &recorder,
             &self.device,
         ).map_err(|e| format!("加载模型失败: {:?}", e))?;
-        println!("✅ 从 {} 加载模型", model_path.display());
+        println!("从 {} 加载模型", model_path.display());
         Ok(())
     }
 
-    /// 保存检查点。
+    // 保存检查点。
     pub fn save_checkpoint(&self, step: usize) -> Result<(), String> {
         let dir = &self.config.checkpoint_dir;
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -323,7 +313,7 @@ impl<B: Backend> Trainer<B> {
             .map_err(|e| format!("保存模型失败: {:?}", e))?;
         fs::copy(&model_path, &latest_path).map_err(|e| e.to_string())?;
 
-        println!("💾 检查点已保存: step={}", step);
+        println!("检查点已保存: step={}", step);
         Ok(())
     }
 
@@ -331,9 +321,7 @@ impl<B: Backend> Trainer<B> {
     pub fn metrics(&self) -> &TrainingMetrics { &self.metrics }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 训练循环（需要 Autodiff 后端）
-// ═══════════════════════════════════════════════════════════════════════════════
 
 impl<B: AutodiffBackend> Trainer<B> {
     pub fn train(&mut self, dataset: &mut HighResDataset) -> Result<(), String> {
@@ -346,22 +334,19 @@ impl<B: AutodiffBackend> Trainer<B> {
         fs::create_dir_all(&config.log_dir).map_err(|e| e.to_string())?;
         fs::create_dir_all(&config.checkpoint_dir).map_err(|e| e.to_string())?;
 
-        println!("╔══════════════════════════════════════════════════════════╗");
-        println!("║           RefGuidedUpsampler 训练启动                    ║");
-        println!("╠══════════════════════════════════════════════════════════╣");
-        println!("║  数据集图像数: {:>6}                                     ║", dataset.len());
-        println!("║  训练轮数:     {:>6}                                     ║", config.num_epochs);
-        println!("║  每轮步数:     {:>6}                                     ║", config.steps_per_epoch);
-        println!("║  学习率:       {:>10.6}                                  ║", config.learning_rate);
-        println!("║  裁剪尺寸:     {:>6}×{:>6} (main)                         ║",
+        println!("RefGuidedUpsampler 训练启动");
+        println!("数据集图像数:{:>6}", dataset.len());
+        println!("训练轮数:{:>6}", config.num_epochs);
+        println!("每轮步数:{:>6}", config.steps_per_epoch);
+        println!("学习率:{:>10.6}", config.learning_rate);
+        println!("裁剪尺寸:{:>6}×{:>6} (main)",
             config.crop_main_size, config.crop_main_size);
-        println!("║                 {:>6}×{:>6} (ref)                          ║",
+        println!("{:>6}×{:>6} (ref)",
             config.crop_main_size * 4, config.crop_main_size * 4);
-        println!("║  全分辨率模式: {:>6}                                     ║",
+        println!("全分辨率模式:{:>6}",
             if config.full_resolution { "ON" } else { "OFF" });
-        println!("║  参数量:       {:>6}                                     ║",
+        println!("参数量:{:>6}",
             self.model.num_params());
-        println!("╚══════════════════════════════════════════════════════════╝");
 
         let main_size = if config.full_resolution { 1024 } else { config.crop_main_size };
         let mut global_step = 0usize;
@@ -375,7 +360,7 @@ impl<B: AutodiffBackend> Trainer<B> {
                 // 1. 加载训练样本
                 let (main_img, ref_img, gt_img, _path) = match dataset.random_crop_pair(main_size, config.use_camera_filters) {
                     Ok(pair) => pair,
-                    Err(e) => { eprintln!("⚠️  跳过: {}", e); continue; }
+                    Err(e) => { eprintln!("跳过: {}", e); continue; }
                 };
 
                 // 2. 转换为张量
@@ -429,21 +414,19 @@ impl<B: AutodiffBackend> Trainer<B> {
             let avg_epoch_loss = epoch_loss / epoch_samples.max(1) as f32;
             self.metrics.avg_loss = avg_epoch_loss;
             println!(
-                "━━━ Epoch {} 完成 ━━━ avg_loss={:.6}  samples={} ━━━",
+                "Epoch{} 完成 avg_loss={:.6} samples={} ",
                 epoch + 1, avg_epoch_loss, self.metrics.samples_seen,
             );
             self.save_checkpoint(global_step)?;
         }
 
-        println!("✅ 训练完成！总步数: {}", global_step);
+        println!("训练完成！总步数: {}", global_step);
         self.save_checkpoint(global_step)?;
         Ok(())
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
 // 测试
-// ═══════════════════════════════════════════════════════════════════════════════
 
 #[cfg(test)]
 mod tests {
