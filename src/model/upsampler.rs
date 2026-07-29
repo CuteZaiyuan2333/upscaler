@@ -184,7 +184,7 @@ impl<B: Backend> RefGuidedUpsampler<B> {
             .upsample_to_4096
             .forward(feat, ref_f0, &self.upsample_2x);
 
-        let delta = self.detail_head.forward(feat);
+        let delta = activation::tanh(self.detail_head.forward(feat));
         let gate = self.presence_gate.forward(main_up.clone(), reference);
 
         clamp01(main_up + gate * delta)

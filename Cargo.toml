@@ -16,3 +16,7 @@ path = "src/main.rs"
 [[bin]]
 name = "train"
 path = "src/bin/train.rs"
+
+[[bin]]
+name = "test_checkpoints"
+path = "src/bin/test_checkpoints.rs"

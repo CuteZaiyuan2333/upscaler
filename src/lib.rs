@@ -14,5 +14,6 @@ pub use model::{
 pub use tensor_image::{
     ImageTensorError,
     load_rgb_tensor,
+    rgb_image_to_tensor,
     save_rgb_tensor,
 };

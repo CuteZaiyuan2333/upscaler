@@ -84,7 +84,7 @@ fn to_rgb8(img: &DynamicImage) -> Result<RgbImage, ImageTensorError> {
     }
 }
 
-fn rgb_image_to_tensor<B: Backend>(img: RgbImage, device: &B::Device) -> Tensor<B, 4> {
+pub fn rgb_image_to_tensor<B: Backend>(img: RgbImage, device: &B::Device) -> Tensor<B, 4> {
     let (width, height) = img.dimensions();
     let pixels = img.into_raw();
     let mut data = Vec::with_capacity(pixels.len());
