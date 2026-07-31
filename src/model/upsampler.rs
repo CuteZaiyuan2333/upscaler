@@ -11,12 +11,11 @@ use burn::{
 };
 
 use super::blocks::{
-    DepthwiseSeparableConv, DepthwiseSeparableConvConfig, FusionBlock, FusionBlockConfig,
+    FusionBlock, FusionBlockConfig,
     ResBlock, ResBlockConfig, UpsampleStage, UpsampleStageConfig,
 };
-use super::presence_gate::{PresenceGate, PresenceGateConfig};
 
-// 参考引导条件上采样器。
+//参考引导条件上采样器
 
 #[derive(Module, Debug)]
 pub struct RefGuidedUpsampler<B: Backend> {
@@ -27,11 +26,31 @@ pub struct RefGuidedUpsampler<B: Backend> {
     fusion_bottleneck: FusionBlock<B>,
     upsample_to_2048: UpsampleStage<B>,
     upsample_to_4096: UpsampleStage<B>,
-    detail_head: Conv2d<B>,
-    presence_gate: PresenceGate<B>,
-    upsample_2x: Interpolate2d,
+    detail_head: DetailHead<B>,
+    /// 仅用于主图初始 4× 上采样（Bilinear 提供平滑基线）
     upsample_4x: Interpolate2d,
 }
+
+// 细节生成头：3 层卷积解码器
+// 替代原来的单层 Conv2d，给模型足够容量从特征生成高频细节。
+
+#[derive(Module, Debug)]
+struct DetailHead<B: Backend> {
+    conv1: Conv2d<B>,
+    conv2: Conv2d<B>,
+    conv3: Conv2d<B>,
+}
+
+impl<B: Backend> DetailHead<B> {
+    fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
+        let x = activation::relu(self.conv1.forward(input));
+        let x = activation::relu(self.conv2.forward(x));
+        // tanh 将 delta 约束在 [-1, 1]，防止 main_up + delta 超出 [0,1] 导致过曝
+        activation::tanh(self.conv3.forward(x))
+    }
+}
+
+//编码器 
 
 #[derive(Module, Debug)]
 struct MainEncoder<B: Backend> {
@@ -41,15 +60,17 @@ struct MainEncoder<B: Backend> {
 
 #[derive(Module, Debug)]
 struct RefEncoder<B: Backend> {
-    // 4096 尺度浅层特征（仅 2 层 depthwise，控制显存）
-    full_res_blocks: Vec<DepthwiseSeparableConv<B>>,
-    // 4096 → 2048
+    // 全分辨率特征：单层 Conv + ReLU（比 depthwise 强，比 ResBlock 轻）
+    full_res_conv: Conv2d<B>,
+    // 下采样到 1/2 分辨率
     pool_to_2048: Conv2d<B>,
     blocks_2048: Vec<ResBlock<B>>,
-    // 2048 → 1024
+    // 下采样到 1/4 分辨率
     pool_to_1024: Conv2d<B>,
     blocks_1024: Vec<ResBlock<B>>,
 }
+
+//配置
 
 #[derive(Config, Debug)]
 pub struct RefGuidedUpsamplerConfig {
@@ -57,14 +78,13 @@ pub struct RefGuidedUpsamplerConfig {
     pub base_channels: usize,
     #[config(default = 4)]
     pub num_res_blocks: usize,
-    #[config(default = 32)]
-    pub gate_hidden_channels: usize,
 }
 
 impl RefGuidedUpsamplerConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> RefGuidedUpsampler<B> {
         let c = self.base_channels;
         let c2 = c * 2;
+        let c_half = c / 2;
 
         RefGuidedUpsampler {
             main_stem: Conv2dConfig::new([3, c], [3, 3])
@@ -82,9 +102,10 @@ impl RefGuidedUpsamplerConfig {
                 .with_padding(PaddingConfig2d::Same)
                 .init(device),
             ref_encoder: RefEncoder {
-                full_res_blocks: (0..2)
-                    .map(|_| DepthwiseSeparableConvConfig::new(c, 3).init(device))
-                    .collect(),
+                // 全分辨率使用单层 Conv（比 depthwise 强，比 ResBlock 轻量）
+                full_res_conv: Conv2dConfig::new([c, c], [3, 3])
+                    .with_padding(PaddingConfig2d::Same)
+                    .init(device),
                 pool_to_2048: Conv2dConfig::new([c, c2], [3, 3])
                     .with_stride([2, 2])
                     .with_padding(PaddingConfig2d::Same)
@@ -103,23 +124,26 @@ impl RefGuidedUpsamplerConfig {
             fusion_bottleneck: FusionBlockConfig::new(c, c2, c).init(device),
             upsample_to_2048: UpsampleStageConfig::new(c, c2).init(device),
             upsample_to_4096: UpsampleStageConfig::new(c, c).init(device),
-            detail_head: Conv2dConfig::new([c, 3], [3, 3])
-                .with_padding(PaddingConfig2d::Same)
-                .init(device),
-            presence_gate: PresenceGateConfig::new(self.gate_hidden_channels).init(device),
-            // 使用 Nearest 模式而非 Linear：CubeCL/WGPU 后端不支持双线性插值的反向传播。
-            // UpsampleStage 中的 smooth 卷积层会补偿最近邻上采样带来的块状伪影。
-            upsample_2x: Interpolate2dConfig::new()
-                .with_scale_factor(Some([2.0, 2.0]))
-                .with_mode(InterpolateMode::Nearest)
-                .init(),
+            detail_head: DetailHead {
+                conv1: Conv2dConfig::new([c, c_half], [3, 3])
+                    .with_padding(PaddingConfig2d::Same)
+                    .init(device),
+                conv2: Conv2dConfig::new([c_half, c_half], [3, 3])
+                    .with_padding(PaddingConfig2d::Same)
+                    .init(device),
+                conv3: Conv2dConfig::new([c_half, 3], [3, 3])
+                    .with_padding(PaddingConfig2d::Same)
+                    .init(device),
+            },
             upsample_4x: Interpolate2dConfig::new()
                 .with_scale_factor(Some([4.0, 4.0]))
-                .with_mode(InterpolateMode::Nearest)
+                .with_mode(InterpolateMode::Linear)
                 .init(),
         }
     }
 }
+
+//编码器 forward
 
 impl<B: Backend> MainEncoder<B> {
     fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
@@ -132,12 +156,9 @@ impl<B: Backend> MainEncoder<B> {
 }
 
 impl<B: Backend> RefEncoder<B> {
-    // 返回 (ref_f0@4096, ref_f1@2048, ref_f2@1024) 三级 skip 特征。
+    /// 返回 (ref_f0, ref_f1, ref_f2) 三级 skip 特征。
     fn forward(&self, input: Tensor<B, 4>) -> (Tensor<B, 4>, Tensor<B, 4>, Tensor<B, 4>) {
-        let mut f0 = input;
-        for block in &self.full_res_blocks {
-            f0 = block.forward(f0);
-        }
+        let f0 = activation::relu(self.full_res_conv.forward(input));
 
         let mut f1 = self.pool_to_2048.forward(f0.clone());
         f1 = activation::relu(f1);
@@ -155,17 +176,23 @@ impl<B: Backend> RefEncoder<B> {
     }
 }
 
+//主 forward
+
 impl<B: Backend> RefGuidedUpsampler<B> {
     // 前向推理。
     //
-    // main：[B, 3, 1024, 1024] Flux2 编辑后的主图
-    // reference: [B, 3, 4096, 4096] 原始参考图（与主图同场景、像素对齐）
+    // main：[B, 3, H, W] 主图（如 256×256）
+    // reference: [B, 3, 4H, 4W] 参考图（如 1024×1024）
     //
-    // 返回 [B, 3, 4096, 4096] 成品图。
+    // 返回 [B, 3, 4H, 4W] 成品图。
+    //
+    // 公式：output = clamp(main_up + detail_head(features))
+    // 不再使用 presence_gate 和 tanh，让模型自由学习细节强度。
     pub fn forward(&self, main: Tensor<B, 4>, reference: Tensor<B, 4>) -> Tensor<B, 4> {
+        // 主图 4× bilinear 上采样（平滑基线）
         let main_up = self.upsample_4x.forward(main.clone());
 
-        // 主图编码 @1024
+        // 主图编码
         let main_feat = activation::relu(self.main_stem.forward(main));
         let main_feat = self.main_encoder.forward(main_feat);
 
@@ -173,55 +200,34 @@ impl<B: Backend> RefGuidedUpsampler<B> {
         let ref_feat = self.ref_stem.forward(reference.clone());
         let (ref_f0, ref_f1, ref_f2) = self.ref_encoder.forward(ref_feat);
 
-        // 瓶颈融合 @1024
+        // 瓶颈融合
         let mut feat = self.fusion_bottleneck.forward(main_feat, ref_f2);
 
         // 渐进上采样 + 参考 skip
-        feat = self
-            .upsample_to_2048
-            .forward(feat, ref_f1, &self.upsample_2x);
-        feat = self
-            .upsample_to_4096
-            .forward(feat, ref_f0, &self.upsample_2x);
+        feat = self.upsample_to_2048.forward(feat, ref_f1);
+        feat = self.upsample_to_4096.forward(feat, ref_f0);
 
-        let delta = activation::tanh(self.detail_head.forward(feat));
-        let gate = self.presence_gate.forward(main_up.clone(), reference);
+        // 细节生成（无 gate，tanh 约束 delta 范围防止过曝）
+        let delta = self.detail_head.forward(feat);
 
-        clamp01(main_up + gate * delta)
+        clamp01(main_up + delta)
     }
 }
 
-// 将 RGB 张量限制在 [0, 1]
+//工具函数
+
 fn clamp01<B: Backend>(tensor: Tensor<B, 4>) -> Tensor<B, 4> {
     activation::relu(tensor).clamp_max(1.0)
 }
 
-// 训练损失建议（供训练脚本参考，非 Module 一部分）
-#[allow(dead_code)]
-pub struct TrainingLossHints {
-    pub l1_weight: f32,
-    pub perceptual_weight: f32,
-    pub gate_supervision_weight: f32,
-}
-
-impl Default for TrainingLossHints {
-    fn default() -> Self {
-        Self {
-            l1_weight: 1.0,
-            perceptual_weight: 0.1,
-            gate_supervision_weight: 0.0,
-        }
-    }
-}
+//测试
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    //use burn::backend::NdArray;
     use burn::backend::Wgpu;
     use burn::prelude::Module;
 
-    //type TestBackend = NdArray;
     type TestBackend = Wgpu;
 
     #[test]
@@ -242,7 +248,7 @@ mod tests {
         let device = Default::default();
         let model = RefGuidedUpsamplerConfig::new().init::<TestBackend>(&device);
         let params = model.num_params();
-        // 默认配置应控制在 ~5M 参数以内
+        // 默认配置应控制在 5M 参数以内
         assert!(params < 5_000_000, "params={params}");
     }
 }

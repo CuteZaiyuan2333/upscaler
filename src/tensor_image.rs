@@ -65,10 +65,11 @@ pub fn save_rgb_tensor<B: Backend>(
 
     for y in 0..height {
         for x in 0..width {
-            let base = (y * width + x) * 3;
-            let r = (values[base].clamp(0.0, 1.0) * 255.0).round() as u8;
-            let g = (values[base + 1].clamp(0.0, 1.0) * 255.0).round() as u8;
-            let b = (values[base + 2].clamp(0.0, 1.0) * 255.0).round() as u8;
+            // CHW 布局: R 全部在前，然后是 G，最后是 B
+            let idx = y * width + x;
+            let r = (values[idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let g = (values[height * width + idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+            let b = (values[2 * height * width + idx].clamp(0.0, 1.0) * 255.0).round() as u8;
             img.put_pixel(x as u32, y as u32, Rgb([r, g, b]));
         }
     }

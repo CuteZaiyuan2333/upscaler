@@ -3,8 +3,7 @@ use burn::{
     module::Module,
     nn::{
         PaddingConfig2d,
-        conv::{Conv2d, Conv2dConfig},
-        interpolate::Interpolate2d,
+        conv::{Conv2d, Conv2dConfig, ConvTranspose2d, ConvTranspose2dConfig},
     },
     prelude::Backend,
     tensor::{Tensor, activation},
@@ -78,43 +77,13 @@ impl<B: Backend> FusionBlock<B> {
     }
 }
 
-// 深度可分离卷积：逐通道空间卷积 + 1x1 点卷积，用于 4K 参考图的高效浅层处理。。
-#[derive(Module, Debug)]
-pub struct DepthwiseSeparableConv<B: Backend> {
-    depthwise: Conv2d<B>,
-    pointwise: Conv2d<B>,
-}
-
-#[derive(Config, Debug)]
-pub struct DepthwiseSeparableConvConfig {
-    pub channels: usize,
-    pub kernel_size: usize,
-}
-
-impl DepthwiseSeparableConvConfig {
-    pub fn init<B: Backend>(&self, device: &B::Device) -> DepthwiseSeparableConv<B> {
-        let k = self.kernel_size;
-        DepthwiseSeparableConv {
-            depthwise: Conv2dConfig::new([self.channels, self.channels], [k, k])
-                .with_groups(self.channels)
-                .with_padding(PaddingConfig2d::Same)
-                .init(device),
-            pointwise: Conv2dConfig::new([self.channels, self.channels], [1, 1]).init(device),
-        }
-    }
-}
-
-impl<B: Backend> DepthwiseSeparableConv<B> {
-    pub fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
-        let x = self.depthwise.forward(input);
-        let x = activation::relu(x);
-        self.pointwise.forward(x)
-    }
-}
-
-// 2x 上采样阶段：双线性插值 -> 卷积平滑 -> 与参考 skip 融合。
+// 2x 上采样阶段：学习型转置卷积 → 卷积平滑 → 与参考 skip 融合。
+//
+// 使用 ConvTranspose2d（可学习上采样）替代 Interpolate2d（固定插值），
+// 使模型能学会从低分辨率特征生成高频细节，而非只是复制/平均像素。
 #[derive(Module, Debug)]
 pub struct UpsampleStage<B: Backend> {
+    up: ConvTranspose2d<B>,
     smooth: Conv2d<B>,
     fusion: FusionBlock<B>,
 }
@@ -127,11 +96,18 @@ pub struct UpsampleStageConfig {
 
 impl UpsampleStageConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> UpsampleStage<B> {
+        let c = self.channels;
         UpsampleStage {
-            smooth: Conv2dConfig::new([self.channels, self.channels], [3, 3])
+            // kernel=4, stride=2, padding=1 实现精确 2× 上采样
+            up: ConvTranspose2dConfig::new([c, c], [4, 4])
+                .with_stride([2, 2])
+                .with_padding([1, 1])
+                .with_bias(true)
+                .init(device),
+            smooth: Conv2dConfig::new([c, c], [3, 3])
                 .with_padding(PaddingConfig2d::Same)
                 .init(device),
-            fusion: FusionBlockConfig::new(self.channels, self.ref_channels, self.channels).init(device),
+            fusion: FusionBlockConfig::new(c, self.ref_channels, c).init(device),
         }
     }
 }
@@ -141,9 +117,9 @@ impl<B: Backend> UpsampleStage<B> {
         &self,
         features: Tensor<B, 4>,
         reference: Tensor<B, 4>,
-        upsample: &Interpolate2d,
     ) -> Tensor<B, 4> {
-        let upsampled = upsample.forward(features);
+        let upsampled = self.up.forward(features);
+        let upsampled = activation::relu(upsampled);
         let upsampled = self.smooth.forward(upsampled);
         self.fusion.forward(upsampled, reference)
     }
