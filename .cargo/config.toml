@@ -1,0 +1,3 @@
+# Windows: 默认栈 1MB → WGPU/DXC 编译器线程栈溢出 → 设为 32MB
+[target.'cfg(windows)']
+rustflags = ["-C", "link-args=/STACK:33554432"]
