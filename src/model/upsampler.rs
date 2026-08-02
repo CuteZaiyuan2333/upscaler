@@ -45,8 +45,7 @@ impl<B: Backend> DetailHead<B> {
     fn forward(&self, input: Tensor<B, 4>) -> Tensor<B, 4> {
         let x = activation::relu(self.conv1.forward(input));
         let x = activation::relu(self.conv2.forward(x));
-        // tanh 将 delta 约束在 [-1, 1]，防止 main_up + delta 超出 [0,1] 导致过曝
-        activation::tanh(self.conv3.forward(x))
+        self.conv3.forward(x) // 无激活，让梯度自由流动
     }
 }
 
@@ -186,8 +185,9 @@ impl<B: Backend> RefGuidedUpsampler<B> {
     //
     // 返回 [B, 3, 4H, 4W] 成品图。
     //
-    // 公式：output = clamp(main_up + detail_head(features))
-    // 不再使用 presence_gate 和 tanh，让模型自由学习细节强度。
+    // 公式：output = main_up + delta
+    // 不做 clamp/sigmoid/tanh，让训练梯度自由流动。
+    // 推理时 save_rgb_tensor 会 clamp 到 [0, 1]。
     pub fn forward(&self, main: Tensor<B, 4>, reference: Tensor<B, 4>) -> Tensor<B, 4> {
         // 主图 4× bilinear 上采样（平滑基线）
         let main_up = self.upsample_4x.forward(main.clone());
@@ -207,17 +207,13 @@ impl<B: Backend> RefGuidedUpsampler<B> {
         feat = self.upsample_to_2048.forward(feat, ref_f1);
         feat = self.upsample_to_4096.forward(feat, ref_f0);
 
-        // 细节生成（无 gate，tanh 约束 delta 范围防止过曝）
+        // 细节生成（无激活约束，梯度自由流动）
         let delta = self.detail_head.forward(feat);
 
-        clamp01(main_up + delta)
+        // 不做 clamp/sigmoid——训练时 L1 loss 会引导输出接近 [0,1]，
+        // 推理时 save_rgb_tensor 做 clamp
+        main_up + delta
     }
-}
-
-//工具函数
-
-fn clamp01<B: Backend>(tensor: Tensor<B, 4>) -> Tensor<B, 4> {
-    activation::relu(tensor).clamp_max(1.0)
 }
 
 //测试
